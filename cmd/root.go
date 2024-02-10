@@ -48,6 +48,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&rootFlags.From, "from", "f", "", "Connection string to the source database")
 	rootCmd.Flags().StringVarP(&rootFlags.To, "to", "t", "", "Connection string to the destination database")
 	rootCmd.Flags().DurationVarP(&rootFlags.Timeout, "timeout", "", rootFlags.Timeout, "Timeout for MongoDB operations")
+	rootCmd.Flags().StringVarP(&rootFlags.Database, "database", "d", rootFlags.Database, "Name of the database to compare")
 	rootCmd.Flags().StringVarP(&rootFlags.LogLevel, "log-level", "l", rootFlags.LogLevel, "Log level (debug, info, warn, error)")
 
 	_ = rootCmd.MarkFlagRequired("from")

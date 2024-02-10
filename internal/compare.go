@@ -1,25 +1,14 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"github.com/fadyat/mongo-cmp/cmd/flags"
+	"github.com/fadyat/mongo-cmp/internal/api"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/sync/errgroup"
 	"log/slog"
-	"time"
 )
 
-const (
-	// InitTimeout is the timeout for initializing the MongoDB connection
-	InitTimeout = 10 * time.Second
-)
-
-// OperationTimeout is the timeout for MongoDB operations
-// value is overridden by the command line flag "timeout"
-var OperationTimeout time.Duration
 var noStats = stats{}
 
 type collectionStats struct {
@@ -46,119 +35,26 @@ type clusterStats struct {
 	Destination stats
 }
 
-type MongoApi interface {
-	ListDatabaseNames() ([]string, error)
-
-	ListCollectionNames(dbName string) ([]string, error)
-
-	CountDocuments(dbName string, collectionName string) (int64, error)
-
-	CollectionStats(dbName, collectionName string) (bson.M, error)
-}
-
 type mongoService struct {
-	api MongoApi
+	api api.MongoApi
 }
 
-func newMongoService(api MongoApi) *mongoService {
-	return &mongoService{api: api}
+func newMongoService(c api.MongoApi) *mongoService {
+	return &mongoService{api: c}
 }
 
-func initMongoConnection(uri string) (*mongo.Client, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), InitTimeout)
-	defer cancel()
+func (m *mongoService) ListDatabaseNames(f *flags.CompareFlags) ([]string, error) {
+	if f.Database == flags.DefaultDatabase {
+		return m.api.ListDatabaseNames()
+	}
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	return []string{f.Database}, nil
+}
+
+func (m *mongoService) CollectStats(f *flags.CompareFlags) (stats, error) {
+	databases, err := m.ListDatabaseNames(f)
 	if err != nil {
-		return nil, err
-	}
-
-	return client, nil
-}
-
-type mongoApi struct {
-	name   string
-	Client *mongo.Client
-}
-
-func newMongoApi(name, uri string) (MongoApi, error) {
-	client, err := initMongoConnection(uri)
-	if err != nil {
-		return nil, err
-	}
-
-	return &mongoApi{
-		name:   name,
-		Client: client,
-	}, nil
-}
-
-func (m *mongoApi) ListDatabaseNames() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), OperationTimeout)
-	defer cancel()
-
-	slog.Debug("listing databases", "where", m.name)
-	return m.Client.ListDatabaseNames(ctx, bson.D{})
-}
-
-func (m *mongoApi) ListCollectionNames(dbName string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), OperationTimeout)
-	defer cancel()
-
-	slog.Debug("listing collections", "where", m.name, "database", dbName)
-	return m.Client.Database(dbName).ListCollectionNames(ctx, bson.D{}, options.ListCollections())
-}
-
-func (m *mongoApi) CountDocuments(dbName, collectionName string) (int64, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), OperationTimeout)
-	defer cancel()
-
-	// ignoring system.sessions collection, we are not interested in it
-	if collectionName == "system.sessions" {
-		return 0, nil
-	}
-
-	// https://www.mongodb.com/docs/drivers/go/current/fundamentals/crud/read-operations/count/#accurate-count
-	//
-	// Avoiding the sequential scan of the entire collection.
-	opts := options.Count().SetHint("_id_")
-
-	slog.Debug("counting documents", "where", m.name, "database", dbName, "collection", collectionName)
-	count, err := m.Client.Database(dbName).
-		Collection(collectionName).
-		CountDocuments(ctx, bson.D{}, opts)
-
-	if err != nil {
-		return 0, err
-	}
-
-	return count, nil
-}
-
-func (m *mongoApi) CollectionStats(dbName, collectionName string) (bson.M, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), OperationTimeout)
-	defer cancel()
-
-	slog.Debug("getting collection stats", "where", m.name, "database", dbName, "collection", collectionName)
-	singleResult := m.Client.Database(dbName).
-		RunCommand(ctx, bson.M{"collStats": collectionName})
-
-	if singleResult.Err() != nil {
-		return nil, singleResult.Err()
-	}
-
-	var result bson.M
-	if err := singleResult.Decode(&result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-func (m *mongoService) CollectStats() (stats, error) {
-	databases, e := m.api.ListDatabaseNames()
-	if e != nil {
-		return stats{}, e
+		return noStats, err
 	}
 
 	var result = newStats()
@@ -216,21 +112,15 @@ func (m *mongoService) aggregateCollectionStats(dbName, collectionName string) c
 	}
 }
 
-func (m *mongoApi) Close() error {
-	return m.Client.Disconnect(context.Background())
-}
-
 func collectData(f *flags.CompareFlags) (*clusterStats, error) {
-	OperationTimeout = f.Timeout
-
-	sourceApi, err := newMongoApi("from", f.From)
+	sourceApi, err := api.NewMongoApi("from", f.From, f.Timeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to the source database: %w", err)
+		return nil, fmt.Errorf("failed to connect to the source (from) database: %w", err)
 	}
 
-	destinationApi, err := newMongoApi("to", f.To)
+	destinationApi, err := api.NewMongoApi("to", f.To, f.Timeout)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to the destination database: %w", err)
+		return nil, fmt.Errorf("failed to connect to the destination (to) database: %w", err)
 	}
 
 	var (
@@ -240,7 +130,7 @@ func collectData(f *flags.CompareFlags) (*clusterStats, error) {
 
 	sourceService := newMongoService(sourceApi)
 	errGroup.Go(func() (err error) {
-		sourceStats, err = sourceService.CollectStats()
+		sourceStats, err = sourceService.CollectStats(f)
 		if err != nil {
 			return fmt.Errorf("failed to collect stats from the source database: %w", err)
 		}
@@ -250,7 +140,7 @@ func collectData(f *flags.CompareFlags) (*clusterStats, error) {
 
 	destinationService := newMongoService(destinationApi)
 	errGroup.Go(func() (err error) {
-		destinationStats, err = destinationService.CollectStats()
+		destinationStats, err = destinationService.CollectStats(f)
 		if err != nil {
 			return fmt.Errorf("failed to collect stats from the destination database: %w", err)
 		}
