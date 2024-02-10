@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"github.com/fadyat/mongo-cmp/cmd/flags"
+	"github.com/fadyat/mongo-cmp/cmd/log"
 	"github.com/fadyat/mongo-cmp/internal"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -24,10 +26,11 @@ For example:
     mongodb://username:password@localhost:27017/mydb
 
 Examples:
-    mongo-cmp --from=mongodb://localhost:27017/mydb --to=mongodb://localhost:27017/mydb2
-	mongo-cmp -f=mongodb://localhost:27017/mydb -t=mongodb://localhost:27017/mydb2 --timeout=30s
+    mongo-cmp --from="mongodb://localhost:27017/mydb" --to="mongodb://localhost:27017/mydb2"
+	mongo-cmp -f="mongodb://localhost:27017/mydb" -t="mongodb://localhost:27017/mydb2" --timeout=30s
 `,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		slog.SetDefault(log.JsonLogger(rootFlags.LogLevel))
 		return rootFlags.Validate()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,6 +48,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&rootFlags.From, "from", "f", "", "Connection string to the source database")
 	rootCmd.Flags().StringVarP(&rootFlags.To, "to", "t", "", "Connection string to the destination database")
 	rootCmd.Flags().DurationVarP(&rootFlags.Timeout, "timeout", "", rootFlags.Timeout, "Timeout for MongoDB operations")
+	rootCmd.Flags().StringVarP(&rootFlags.LogLevel, "log-level", "l", rootFlags.LogLevel, "Log level (debug, info, warn, error)")
 
 	_ = rootCmd.MarkFlagRequired("from")
 	_ = rootCmd.MarkFlagRequired("to")

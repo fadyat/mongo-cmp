@@ -19,7 +19,7 @@ builds:
     id: mongo-cmp
     binary: mongo-cmp
     dir: .
-    ldflags: "-s -w -X cmd.Version={{ .Tag }}"
+    ldflags: "-s -w -X 'github.com/fadyat/mongo-cmp/cmd.Version={{.Version}}'"
 
 archives:
   - format: tar.gz

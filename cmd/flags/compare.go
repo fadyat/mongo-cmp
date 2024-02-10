@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+const (
+	DefaultTimeout  = 15 * time.Second
+	DefaultDatabase = "__all__"
+)
+
 type CompareFlags struct {
 
 	// From is a connection string to the source database
@@ -15,11 +20,19 @@ type CompareFlags struct {
 
 	// Timeout is the timeout for MongoDB operations (default: 15s)
 	Timeout time.Duration
+
+	// Database is the name of the database to compare (default: all databases)
+	Database string
+
+	// LogLevel is the log level
+	LogLevel string
 }
 
 func NewCompareFlags() *CompareFlags {
 	return &CompareFlags{
-		Timeout: 15 * time.Second,
+		Timeout:  DefaultTimeout,
+		Database: DefaultDatabase,
+		LogLevel: "info",
 	}
 }
 
