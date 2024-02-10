@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jedib0t/go-pretty/v6/table"
-	"go.mongodb.org/mongo-driver/bson"
 	"os"
+	"slices"
 )
 
 type relevantStats struct {
@@ -16,14 +16,25 @@ type relevantStats struct {
 	DocumentNumber any `json:"document_number"`
 }
 
-func getRelevantStats(cstats bson.M, docNumber int64) *relevantStats {
-	return &relevantStats{
-		CollectionSize: cstats["size"],
-		StorageSize:    cstats["storageSize"],
-		TotalIndexSize: cstats["totalIndexSize"],
-		TotalSize:      cstats["totalSize"],
-		DocumentNumber: docNumber,
+func getRelevantStats(s collectionStats) string {
+	if !slices.Contains([]string{Succeeded, FailedToCountDocuments}, s.Status) {
+		return s.Status
 	}
+
+	var documentNumber any = s.DocumentsNumber
+	if s.Status == FailedToCountDocuments {
+		documentNumber = "failed to count"
+	}
+
+	rs := &relevantStats{
+		CollectionSize: s.Stats["size"],
+		StorageSize:    s.Stats["storageSize"],
+		TotalIndexSize: s.Stats["totalIndexSize"],
+		TotalSize:      s.Stats["totalSize"],
+		DocumentNumber: documentNumber,
+	}
+
+	return rs.json()
 }
 
 func (s *relevantStats) json() string {
@@ -82,32 +93,27 @@ func showDatabaseDiff(dbName string, s *clusterStats) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
 	t.SetStyle(table.StyleLight)
-	t.AppendHeader(table.Row{"Collection", "Same", "Source", "Destination"})
+	t.AppendHeader(table.Row{"Collection", "Source", "Destination"})
 
 	for _, collectionName := range mergedCollections {
 		sourceStats, have := source[collectionName]
 		if !have {
-			sourceStats = collectionStats{}
+			sourceStats = collectionStats{
+				Status: NotFound,
+			}
 		}
 
 		destinationStats, have := destination[collectionName]
 		if !have {
-			destinationStats = collectionStats{}
-		}
-
-		srelevant := getRelevantStats(sourceStats.Stats, sourceStats.DocumentsNumber)
-		drelevant := getRelevantStats(destinationStats.Stats, destinationStats.DocumentsNumber)
-
-		same := boolToSymbol(*srelevant == *drelevant)
-		if sourceStats.Failed || destinationStats.Failed {
-			same = "N/A"
+			destinationStats = collectionStats{
+				Status: NotFound,
+			}
 		}
 
 		t.AppendRow(table.Row{
 			collectionName,
-			same,
-			getRelevantStats(sourceStats.Stats, sourceStats.DocumentsNumber).json(),
-			getRelevantStats(destinationStats.Stats, destinationStats.DocumentsNumber).json(),
+			getRelevantStats(sourceStats),
+			getRelevantStats(destinationStats),
 		})
 		t.AppendSeparator()
 	}

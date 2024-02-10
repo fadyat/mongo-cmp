@@ -5,7 +5,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log/slog"
 	"time"
 )
 
@@ -37,19 +36,17 @@ func initMongoConnection(uri string) (*mongo.Client, error) {
 }
 
 type mongoApi struct {
-	name             string
 	operationTimeout time.Duration
 	Client           *mongo.Client
 }
 
-func NewMongoApi(name, uri string, operationTimeout time.Duration) (MongoApi, error) {
+func NewMongoApi(uri string, operationTimeout time.Duration) (MongoApi, error) {
 	client, err := initMongoConnection(uri)
 	if err != nil {
 		return nil, err
 	}
 
 	return &mongoApi{
-		name:             name,
 		Client:           client,
 		operationTimeout: operationTimeout,
 	}, nil
@@ -59,7 +56,6 @@ func (m *mongoApi) ListDatabaseNames() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), m.operationTimeout)
 	defer cancel()
 
-	slog.Debug("listing databases", "where", m.name)
 	return m.Client.ListDatabaseNames(ctx, bson.D{})
 }
 
@@ -67,7 +63,6 @@ func (m *mongoApi) ListCollectionNames(dbName string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), m.operationTimeout)
 	defer cancel()
 
-	slog.Debug("listing collections", "where", m.name, "database", dbName)
 	return m.Client.Database(dbName).ListCollectionNames(ctx, bson.D{}, options.ListCollections())
 }
 
@@ -85,7 +80,6 @@ func (m *mongoApi) CountDocuments(dbName, collectionName string) (int64, error) 
 	// Avoiding the sequential scan of the entire collection.
 	opts := options.Count().SetHint("_id_")
 
-	slog.Debug("counting documents", "where", m.name, "database", dbName, "collection", collectionName)
 	count, err := m.Client.Database(dbName).
 		Collection(collectionName).
 		CountDocuments(ctx, bson.D{}, opts)
@@ -101,7 +95,6 @@ func (m *mongoApi) CollectionStats(dbName, collectionName string) (bson.M, error
 	ctx, cancel := context.WithTimeout(context.Background(), m.operationTimeout)
 	defer cancel()
 
-	slog.Debug("getting collection stats", "where", m.name, "database", dbName, "collection", collectionName)
 	singleResult := m.Client.Database(dbName).
 		RunCommand(ctx, bson.M{"collStats": collectionName})
 

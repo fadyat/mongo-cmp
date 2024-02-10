@@ -4,18 +4,28 @@ import (
 	"fmt"
 	"github.com/fadyat/mongo-cmp/cmd/flags"
 	"github.com/fadyat/mongo-cmp/internal/api"
+	"github.com/fadyat/mongo-cmp/internal/progress"
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/sync/errgroup"
 	"log/slog"
+	"time"
 )
 
 var noStats = stats{}
+
+var (
+	Skipped                    = "skipped"
+	FailedToGetCollectionStats = "failed to get collection stats"
+	FailedToCountDocuments     = "failed to count documents"
+	NotFound                   = "not found"
+	Succeeded                  = "succeeded"
+)
 
 type collectionStats struct {
 	Name            string
 	DocumentsNumber int64
 	Stats           bson.M
-	Failed          bool
+	Status          string
 }
 
 type stats struct {
@@ -36,11 +46,15 @@ type clusterStats struct {
 }
 
 type mongoService struct {
-	api api.MongoApi
+	name string
+	api  api.MongoApi
 }
 
-func newMongoService(c api.MongoApi) *mongoService {
-	return &mongoService{api: c}
+func newMongoService(name string, c api.MongoApi) *mongoService {
+	return &mongoService{
+		name: name,
+		api:  c,
+	}
 }
 
 func (m *mongoService) ListDatabaseNames(f *flags.CompareFlags) ([]string, error) {
@@ -66,15 +80,30 @@ func (m *mongoService) CollectStats(f *flags.CompareFlags) (stats, error) {
 			return noStats, err
 		}
 
+		header := fmt.Sprintf("%s(%s): %d collections", dbName, m.name, len(collections))
+		pb := progress.NewProgress(header)
+		pb.Start(len(collections))
+
 		for _, collectionName := range collections {
-			s := m.aggregateCollectionStats(dbName, collectionName)
+			pb.Increment()
 
 			if result.Collections[dbName] == nil {
 				result.Collections[dbName] = make(map[string]collectionStats)
 			}
 
+			if !f.ShowDetails {
+				result.Collections[dbName][collectionName] = collectionStats{
+					Name:   collectionName,
+					Status: Skipped,
+				}
+				continue
+			}
+
+			s := m.aggregateCollectionStats(dbName, collectionName)
 			result.Collections[dbName][collectionName] = s
 		}
+
+		pb.Finish()
 	}
 
 	return result, nil
@@ -91,7 +120,7 @@ func (m *mongoService) aggregateCollectionStats(dbName, collectionName string) c
 		slog.Error("failed to get collection stats", "meta", meta, "error", err)
 		return collectionStats{
 			Name:   collectionName,
-			Failed: true,
+			Status: FailedToGetCollectionStats,
 		}
 	}
 
@@ -101,7 +130,7 @@ func (m *mongoService) aggregateCollectionStats(dbName, collectionName string) c
 		return collectionStats{
 			Name:   collectionName,
 			Stats:  statistics,
-			Failed: true,
+			Status: FailedToCountDocuments,
 		}
 	}
 
@@ -109,16 +138,17 @@ func (m *mongoService) aggregateCollectionStats(dbName, collectionName string) c
 		Name:            collectionName,
 		DocumentsNumber: count,
 		Stats:           statistics,
+		Status:          Succeeded,
 	}
 }
 
 func collectData(f *flags.CompareFlags) (*clusterStats, error) {
-	sourceApi, err := api.NewMongoApi("from", f.From, f.Timeout)
+	sourceApi, err := api.NewMongoApi(f.From, f.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the source (from) database: %w", err)
 	}
 
-	destinationApi, err := api.NewMongoApi("to", f.To, f.Timeout)
+	destinationApi, err := api.NewMongoApi(f.To, f.Timeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to the destination (to) database: %w", err)
 	}
@@ -128,7 +158,7 @@ func collectData(f *flags.CompareFlags) (*clusterStats, error) {
 		errGroup                      errgroup.Group
 	)
 
-	sourceService := newMongoService(sourceApi)
+	sourceService := newMongoService("from", sourceApi)
 	errGroup.Go(func() (err error) {
 		sourceStats, err = sourceService.CollectStats(f)
 		if err != nil {
@@ -138,7 +168,9 @@ func collectData(f *flags.CompareFlags) (*clusterStats, error) {
 		return nil
 	})
 
-	destinationService := newMongoService(destinationApi)
+	time.Sleep(200 * time.Millisecond)
+
+	destinationService := newMongoService("to", destinationApi)
 	errGroup.Go(func() (err error) {
 		destinationStats, err = destinationService.CollectStats(f)
 		if err != nil {
