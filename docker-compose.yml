@@ -1,0 +1,26 @@
+version: '3.9'
+
+services:
+  mongo1:
+    image: mongo:6.0
+    container_name: mongo1
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./mongo1:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+      MONGO_INITDB_DATABASE: admin
+
+  mongo2:
+    image: mongo:6.0
+    container_name: mongo2
+    ports:
+      - "27018:27017"
+    volumes:
+      - ./mongo2:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+      MONGO_INITDB_DATABASE: admin
