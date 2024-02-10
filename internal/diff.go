@@ -98,7 +98,7 @@ func showDatabaseDiff(dbName string, s *clusterStats) {
 		srelevant := getRelevantStats(sourceStats.Stats, sourceStats.DocumentsNumber)
 		drelevant := getRelevantStats(destinationStats.Stats, destinationStats.DocumentsNumber)
 
-		same := boolToSymbol(srelevant == drelevant)
+		same := boolToSymbol(*srelevant == *drelevant)
 		if sourceStats.Failed || destinationStats.Failed {
 			same = "N/A"
 		}
