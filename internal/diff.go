@@ -42,14 +42,6 @@ func (s *relevantStats) json() string {
 	return string(b)
 }
 
-func boolToSymbol(b bool) string {
-	if b {
-		return "+"
-	}
-
-	return "-"
-}
-
 func mergeSlices(s1, s2 []string) []string {
 	m := make(map[string]bool)
 	for _, item := range s1 {
